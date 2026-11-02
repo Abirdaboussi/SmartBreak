@@ -1,0 +1,5 @@
+# Paramètres du pipeline SmartBreak.
+# AUCUN secret ici : les secrets passent par le fichier .env.
+# Les sections de chaque source sont ajoutées à l'étape 1.2 / 1.4.
+project: smartbreak
+sources: {}

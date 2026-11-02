@@ -1,0 +1,2 @@
+-- Vues métier (couche "mart") : indice de sortie, recommandations.
+-- Rédigées aux étapes 1.13 et 5.x.

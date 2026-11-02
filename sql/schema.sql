@@ -1,0 +1,3 @@
+-- Schéma de la base SmartBreak (PostgreSQL + PostGIS)
+-- Tables, clés primaires et étrangères, contraintes, index.
+-- Rédigé à l'étape 1.8, puis enrichi à chaque nouvelle source.

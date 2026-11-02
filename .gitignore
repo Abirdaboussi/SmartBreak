@@ -1,0 +1,18 @@
+# --- Environnement Python ---
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Secrets : JAMAIS dans le dépôt (exigence du guide) ---
+.env
+
+# --- Logs d'exécution ---
+logs/*.log
+
+# --- Données : régénérées par le pipeline, donc non versionnées ---
+# Structure : data/<zone>/<source>/<fichier>
+data/*/*/*
+# ... sauf la structure (.gitkeep) et les échantillons exigés par le guide
+!data/*/*/.gitkeep
+!data/*/*/sample_*
