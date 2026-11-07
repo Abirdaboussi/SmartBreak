@@ -15,4 +15,4 @@ logs/*.log
 data/*/*/*
 # ... sauf la structure (.gitkeep) et les échantillons exigés par le guide
 !data/*/*/.gitkeep
-!data/*/*/sample_*
+!data/raw/*/sample_*
