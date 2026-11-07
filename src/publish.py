@@ -1,6 +1,26 @@
-"""Étape 6 du pipeline - PUBLICATION.
 
-Charge les données curated en base avec un UPSERT (pas de doublon au rejeu).
+"""Publication des données CURATED dans PostgreSQL / PostGIS."""
 
-Implémenté à l'étape 1.8.
-"""
+from src.db import upsert_weather_forecasts
+
+
+def publish_weather_data(curated_rows):
+    """
+    Publie les prévisions météo dans PostgreSQL.
+
+    Args:
+        curated_rows: liste des observations transformées.
+
+    Returns:
+        Nombre de lignes traitées.
+    """
+
+    if not isinstance(curated_rows, list):
+        raise ValueError("Les données à publier doivent être une liste.")
+
+    if not curated_rows:
+        return 0
+
+    published_count = upsert_weather_forecasts(curated_rows)
+
+    return published_count

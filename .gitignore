@@ -10,9 +10,14 @@ __pycache__/
 # --- Logs d'exécution ---
 logs/*.log
 
-# --- Données : régénérées par le pipeline, donc non versionnées ---
-# Structure : data/<zone>/<source>/<fichier>
+# --- Données : régénérées par le pipeline ---
 data/*/*/*
-# ... sauf la structure (.gitkeep) et les échantillons exigés par le guide
+
+# Conserver les dossiers vides
 !data/*/*/.gitkeep
-!data/raw/*/sample_*
+
+# Conserver uniquement l'échantillon RAW de démonstration
+!data/raw/weather/sample_open_meteo_paris_20261107_153258.json
+
+# --- Rapports générés ---
+reports/*.json
