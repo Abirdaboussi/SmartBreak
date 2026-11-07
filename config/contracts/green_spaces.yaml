@@ -1,0 +1,46 @@
+contract:
+  name: paris_green_spaces
+  version: "1.0"
+  description: "Contrat de qualité des espaces verts de Paris Data."
+
+  source:
+    producer: "Ville de Paris - DEVE"
+    dataset_id: "espaces_verts"
+    format: "GeoJSON"
+    license: "ODbL"
+
+  raw_structure:
+    root_type: "FeatureCollection"
+    required_keys:
+      - type
+      - features
+
+  fields:
+    identifier: "nsq_espace_vert"
+    name: "nom_ev"
+    geometry: "geometry"
+    geometry_types:
+      - Polygon
+      - MultiPolygon
+
+  quality_rules:
+    - id: GQ01
+      description: "Identifiant source obligatoire et entier."
+
+    - id: GQ02
+      description: "Identifiant source unique dans le fichier."
+
+    - id: GQ03
+      description: "Nom de l'espace vert obligatoire."
+
+    - id: GQ04
+      description: "Géométrie de type Polygon ou MultiPolygon."
+
+    - id: GQ05
+      description: "Coordonnées numériques et géographiquement valides."
+
+    - id: GQ06
+      description: "Anneaux polygonaux structurés et fermés."
+
+    - id: GQ07
+      description: "Surfaces et périmètres positifs ou nuls."

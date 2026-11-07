@@ -1,7 +1,7 @@
 
 """Publication des données CURATED dans PostgreSQL / PostGIS."""
 
-from src.db import upsert_weather_forecasts
+from src.db import upsert_weather_forecasts, upsert_green_spaces
 
 
 def publish_weather_data(curated_rows):
@@ -24,3 +24,17 @@ def publish_weather_data(curated_rows):
     published_count = upsert_weather_forecasts(curated_rows)
 
     return published_count
+
+
+def publish_green_spaces_data(curated_rows):
+    """Publie les espaces verts CURATED dans PostgreSQL/PostGIS."""
+
+    if not isinstance(curated_rows, list):
+        raise ValueError(
+            "Les espaces verts à publier doivent être une liste."
+        )
+
+    if not curated_rows:
+        return 0
+
+    return upsert_green_spaces(curated_rows)

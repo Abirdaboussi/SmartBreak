@@ -4,87 +4,148 @@
 
 ## 1. Présentation du projet
 
-SmartBreak est un projet de traitement et de valorisation de données destiné à aider le grand public à identifier des moments favorables à une pause ou à une balade en extérieur à Paris.
+SmartBreak est un projet de collecte, de traitement et de valorisation de données destiné à préparer un service d'aide au choix de moments favorables à une pause ou à une balade en extérieur à Paris.
 
-La qualité d'une pause extérieure dépend notamment des conditions météorologiques : température, pluie, vent, humidité et couverture nuageuse.
+La qualité d'une pause extérieure dépend notamment des conditions météorologiques et des caractéristiques des espaces verts disponibles.
 
-La première version technique du projet met en place un pipeline automatisé qui collecte les prévisions météorologiques horaires de Paris, contrôle leur qualité, les transforme, conserve les données brutes et publie les données validées dans PostgreSQL/PostGIS.
-
-**Question centrale :** comment collecter, contrôler, historiser et exploiter des données météorologiques fiables afin de préparer un service d'aide au choix des moments favorables aux pauses extérieures ?
+**Question centrale :** comment collecter, contrôler, historiser et exploiter des données météorologiques et géographiques fiables afin de préparer un service d'aide au choix des moments favorables aux pauses extérieures à Paris ?
 
 ### Public cible
 
 - Grand public résidant à Paris ou visitant la ville.
-- Personnes souhaitant organiser une pause ou une balade en fonction de la météo.
+- Personnes souhaitant organiser une pause ou une balade en extérieur.
 
 ### Périmètre actuel
 
-La version livrée couvre :
-- La collecte de prévisions météorologiques horaires pour Paris.
-- La conservation des réponses brutes au format JSON.
-- La validation selon un contrat de données.
+La version technique implémentée comprend :
+
+- La collecte des prévisions météorologiques horaires de Paris.
+- La collecte des données géographiques des espaces verts de Paris.
+- La conservation des réponses brutes (RAW).
+- La validation des données selon deux contrats de qualité.
 - La séparation des données acceptées et rejetées.
 - La transformation et la normalisation des données.
-- La publication dans PostgreSQL avec l'extension PostGIS.
-- La création de vues SQL pour consulter les dernières prévisions et les synthèses journalières.
-- La traçabilité des exécutions par des logs et un rapport JSON.
+- La publication des données validées dans PostgreSQL/PostGIS.
+- L'historisation des prévisions météorologiques.
+- La gestion de l'unicité des espaces verts à partir de leurs identifiants sources.
+- La traçabilité des exécutions par des logs et des rapports JSON.
 
-Les espaces verts, la recommandation personnalisée de lieux, l'interface utilisateur et le moteur complet de décision constituent des évolutions futures et ne sont pas présentés comme des fonctionnalités déjà livrées.
+Le moteur de recommandation, le score de confort extérieur et l'interface utilisateur ne sont pas encore implémentés.
 
-## 2. Architecture et flux de données
+## 2. Sources de données
 
-Le pipeline suit les étapes suivantes :
+Deux sources complémentaires sont intégrées.
 
-1. **Collecte :** récupération des prévisions horaires via l'API Open-Meteo.
-2. **RAW :** archivage de la réponse JSON avec les métadonnées de collecte.
-3. **Validation :** contrôle des observations selon le contrat `config/contracts/weather.yaml`.
-4. **Rejets :** conservation des observations invalides et de leurs motifs de rejet.
-5. **Transformation :** normalisation des timestamps et préparation des champs CURATED.
-6. **Publication :** insertion ou mise à jour des données dans PostgreSQL/PostGIS par UPSERT.
-7. **Consultation :** exposition des données au moyen de vues SQL.
-8. **Traçabilité :** écriture des logs et du rapport `reports/run_report.json`.
+### 2.1. Prévisions météorologiques — Open-Meteo
+
+**Source :** Open-Meteo Forecast API
+
+URL : https://api.open-meteo.com/v1/forecast
+
+- Localisation : Paris, France.
+- Coordonnées demandées : latitude 48.8566, longitude 2.3522.
+- Format : JSON.
+- Fréquence : horaire.
+- Horizon de collecte : 7 jours.
+
+Variables collectées :
+
+| Variable | Description | Unité |
+|---|---|---|
+| `temperature_2m` | Température à 2 mètres | °C |
+| `apparent_temperature` | Température ressentie | °C |
+| `relative_humidity_2m` | Humidité relative | % |
+| `precipitation` | Précipitations prévues | mm |
+| `precipitation_probability` | Probabilité de précipitations | % |
+| `wind_speed_10m` | Vitesse du vent à 10 mètres | km/h |
+| `cloud_cover` | Couverture nuageuse | % |
+| `weather_code` | Code météorologique WMO | Code |
+
+Ces données correspondent à des prévisions et non à des mesures météorologiques réellement observées.
+
+### 2.2. Espaces verts — Paris Data
+
+**Source :** Ville de Paris — dataset « Espaces verts et assimilés ».
+
+Page du dataset : https://opendata.paris.fr/explore/dataset/espaces_verts/
+
+Endpoint de collecte :
+
+https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/espaces_verts/exports/geojson
+
+- Producteur : Ville de Paris, DEVE.
+- Format : GeoJSON.
+- Identifiant du dataset : `espaces_verts`.
+- Identifiant métier des enregistrements : identifiant source de chaque espace vert.
+- Licence : Open Database License (ODbL).
+- Fréquence de mise à jour annoncée : quotidienne.
+
+Les données comprennent des informations descriptives, des caractéristiques des espaces verts et leurs géométries géographiques.
+
+**Attention :** le dataset contient différentes catégories d'espaces végétalisés et assimilés. Tous les enregistrements ne correspondent pas nécessairement à des parcs publics accessibles au public. Une vérification des catégories et des conditions d'accès sera nécessaire avant toute recommandation.
+
+Les informations détaillées relatives aux sources, aux licences et aux risques techniques sont disponibles dans `docs/sources.md`.
+
+## 3. Architecture et flux de données
+
+Le projet repose sur un pipeline automatisé commun aux deux sources.
+
+```mermaid
+flowchart TD
+    A["Open-Meteo API"] --> C["Collecte Python"]
+    B["Paris Data - Espaces verts"] --> D["Collecte Python"]
+    C --> E["RAW - JSON"]
+    D --> F["RAW - GeoJSON"]
+    E --> G["Validation - Contrat météo"]
+    F --> H["Validation - Contrat espaces verts"]
+    G --> I["Transformation météo"]
+    H --> J["Transformation espaces verts"]
+    G --> K["REJECTED météo"]
+    H --> L["REJECTED espaces verts"]
+    I --> M["CURATED météo"]
+    J --> N["CURATED espaces verts"]
+    M --> O["Publication UPSERT"]
+    N --> O
+    O --> P[("PostgreSQL + PostGIS")]
+    P --> Q["Vues SQL météo"]
+    C --> R["Logs et rapport global"]
+    D --> R
+```
+
+### Étapes du pipeline
+
+1. **Initialisation :** connexion à PostgreSQL/PostGIS et initialisation du schéma et des vues SQL.
+2. **Collecte :** récupération des données auprès des deux API.
+3. **RAW :** conservation des réponses brutes avec leurs métadonnées.
+4. **Validation :** application des contrats de qualité respectifs.
+5. **REJECTED :** conservation des enregistrements non conformes et de leurs motifs.
+6. **Transformation :** normalisation et préparation des données acceptées.
+7. **CURATED :** sauvegarde des données transformées.
+8. **Publication :** insertion ou mise à jour des données dans PostgreSQL/PostGIS.
+9. **Traçabilité :** enregistrement des logs et génération du rapport global.
 
 ### Technologies
 
 | Élément | Technologie |
 |---|---|
 | Langage | Python |
-| Source météo | Open-Meteo Forecast API |
-| Format RAW | JSON |
-| Contrat de données | YAML |
+| API météo | Open-Meteo Forecast API |
+| Source géographique | Paris Data |
+| Formats RAW | JSON et GeoJSON |
+| Contrats de données | YAML |
 | Base de données | PostgreSQL |
 | Données géographiques | PostGIS |
 | Accès base de données | psycopg 3 |
 | Tests | pytest |
 | Configuration | python-dotenv |
 
-## 3. Source de données et licence
-
-La source actuellement intégrée est l'API de prévisions météorologiques Open-Meteo :
-
-https://api.open-meteo.com/v1/forecast
-
-Les variables collectées sont :
-- `temperature_2m` : température à 2 mètres, en °C.
-- `apparent_temperature` : température ressentie, en °C.
-- `relative_humidity_2m` : humidité relative, en %.
-- `precipitation` : précipitations prévues, en mm.
-- `precipitation_probability` : probabilité de précipitations, en %.
-- `wind_speed_10m` : vitesse du vent à 10 mètres, en km/h.
-- `cloud_cover` : couverture nuageuse, en %.
-- `weather_code` : code météorologique WMO.
-
-Les données sont des **prévisions**, et non des observations météorologiques réellement mesurées.
-
-Les conditions de licence et d'attribution applicables à la source sont documentées dans `docs/sources.md`. La source doit être attribuée à Open-Meteo conformément à ses conditions d'utilisation.
-
 ## 4. Installation et configuration
 
 ### Prérequis
 
-- Python 3.10 ou version compatible avec les dépendances du projet.
+- Python 3.10 ou version compatible avec les dépendances.
 - PostgreSQL installé et démarré.
-- Extension PostGIS disponible sur l'instance PostgreSQL.
+- Extension PostGIS disponible.
 - Git.
 
 ### Récupération du projet
@@ -103,7 +164,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Configuration de la base de données
+### Configuration PostgreSQL
 
 Créer une base PostgreSQL nommée `smartbreak` et un utilisateur disposant des droits nécessaires.
 
@@ -113,7 +174,7 @@ Copier le fichier d'exemple :
 Copy-Item .env.example .env
 ```
 
-Modifier ensuite `.env` avec les paramètres de connexion de l'environnement local :
+Configurer ensuite les paramètres de connexion dans `.env` :
 
 ```dotenv
 POSTGRES_HOST=localhost
@@ -123,7 +184,7 @@ POSTGRES_USER=smartbreak
 POSTGRES_PASSWORD=VOTRE_MOT_DE_PASSE
 ```
 
-Le fichier `.env` contient des informations de connexion et ne doit jamais être ajouté au dépôt Git.
+Le fichier `.env` contient des informations sensibles et ne doit jamais être ajouté au dépôt Git.
 
 L'extension PostGIS est activée par le script `sql/schema.sql`. L'utilisateur PostgreSQL doit disposer des permissions nécessaires pour créer cette extension, ou celle-ci doit être activée préalablement par un administrateur.
 
@@ -135,25 +196,51 @@ Depuis la racine du projet, avec l'environnement virtuel activé :
 python -m src.pipeline
 ```
 
-Le pipeline exécute automatiquement :
-- l'initialisation du schéma PostgreSQL/PostGIS et des vues ;
-- la collecte des prévisions ;
-- la validation des observations ;
-- la transformation des observations acceptées ;
-- la sauvegarde des fichiers CURATED et REJECTED ;
-- la publication dans PostgreSQL ;
-- la génération du rapport d'exécution.
+Le pipeline exécute successivement la collecte, la validation, la transformation, la persistance et la publication des deux datasets.
 
-Les sorties sont enregistrées dans :
-- `data/raw/weather/` : réponses brutes ;
-- `data/curated/weather/` : données transformées et acceptées ;
-- `data/rejected/weather/` : données rejetées ;
-- `logs/` : journaux d'exécution ;
-- `reports/run_report.json` : rapport de la dernière exécution.
+### Organisation des sorties
+
+```text
+data/
+├── raw/
+│   ├── weather/
+│   └── green_spaces/
+├── curated/
+│   ├── weather/
+│   └── green_spaces/
+└── rejected/
+    ├── weather/
+    └── green_spaces/
+
+config/
+└── contracts/
+    ├── weather.yaml
+    └── green_spaces.yaml
+
+sql/
+├── schema.sql
+└── views.sql
+
+reports/
+├── run_report.json
+├── weather/
+└── green_spaces/
+
+logs/
+└── pipeline.log
+```
+
+Les fichiers RAW conservent les données originales. Les fichiers CURATED contiennent les données validées et transformées. Les fichiers REJECTED conservent les enregistrements non conformes et leurs motifs de rejet.
+
+Le rapport global de la dernière exécution est disponible dans `reports/run_report.json`.
 
 ## 6. Qualité des données et tests
 
-Le contrat `config/contracts/weather.yaml` définit le schéma attendu et les contrôles de qualité.
+Chaque source dispose de son propre contrat de données.
+
+### 6.1. Contrat météo
+
+Fichier : `config/contracts/weather.yaml`
 
 Huit règles sont appliquées :
 
@@ -168,7 +255,40 @@ Huit règles sont appliquées :
 | Q07 | Validité des codes météorologiques WMO |
 | Q08 | Cohérence des unités |
 
-Les observations non conformes sont isolées dans le répertoire REJECTED avec leurs motifs de rejet. Les observations valides sont transformées et publiées.
+### 6.2. Contrat des espaces verts
+
+Fichier : `config/contracts/green_spaces.yaml`
+
+Sept règles sont appliquées :
+
+| Règle | Contrôle |
+|---|---|
+| GQ01 | Présence et validité de l'identifiant source |
+| GQ02 | Unicité de l'identifiant source |
+| GQ03 | Présence du nom |
+| GQ04 | Type de géométrie accepté (Polygon ou MultiPolygon) |
+| GQ05 | Validité des coordonnées géographiques |
+| GQ06 | Structure et fermeture des anneaux polygonaux |
+| GQ07 | Valeurs numériques non négatives pour les surfaces et périmètres |
+
+La validation géométrique topologique complémentaire est réalisée au niveau de PostGIS avec `ST_IsValid`.
+
+### 6.3. Résultats de validation
+
+Lors de l'exécution du 7 novembre 2026 :
+
+| Indicateur | Météo | Espaces verts |
+|---|---:|---:|
+| Enregistrements collectés | 168 | 2 535 |
+| Enregistrements acceptés | 168 | 2 525 |
+| Enregistrements rejetés | 0 | 10 |
+| Taux d'acceptation | 100 % | 99,61 % |
+
+Pour les espaces verts, les rejets correspondent à 9 identifiants absents et 1 géométrie absente.
+
+Ces chiffres correspondent à une exécution donnée et peuvent varier selon les prochaines collectes et les évolutions des sources.
+
+### 6.4. Tests automatisés
 
 Pour lancer les tests :
 
@@ -176,15 +296,42 @@ Pour lancer les tests :
 python -m pytest -q
 ```
 
-La suite de tests actuelle contient **19 tests réussis** dans l'environnement de développement utilisé pour valider cette version.
+La suite de tests exécutée contient actuellement **19 tests réussis**.
 
-## 7. Base de données et consultation
+## 7. Base de données PostgreSQL/PostGIS
 
-La table `weather_forecasts` stocke les prévisions validées, leurs métadonnées et leur géométrie géographique au format PostGIS `geometry(Point, 4326)`.
+Le schéma relationnel et spatial est défini dans `sql/schema.sql`.
 
-Une contrainte d'unicité sur `(location, forecast_time, retrieved_at)` permet de rejouer une même collecte sans créer de doublons.
+### 7.1. Table `weather_forecasts`
 
-Deux vues facilitent la consultation :
+Cette table conserve les prévisions météorologiques, leurs variables, leurs métadonnées et la géométrie du point de prévision au format PostGIS.
+
+La contrainte d'unicité sur `(location, forecast_time, retrieved_at)` permet de conserver plusieurs snapshots d'une même prévision tout en évitant les doublons lors de la republication d'une même collecte.
+
+### 7.2. Table `green_spaces`
+
+Cette table conserve les espaces verts validés et leurs informations géographiques.
+
+Elle comprend notamment :
+
+- `source_id` : identifiant de l'enregistrement dans la source Paris Data.
+- `name` : nom de l'espace vert.
+- `type_ev` et `category` : type et catégorie.
+- `postal_code` : code postal.
+- `real_surface_m2` et autres surfaces disponibles.
+- `perimeter_m` : périmètre.
+- `geom` : géométrie Polygon ou MultiPolygon en SRID 4326.
+- `representative_point` : point représentatif géographique.
+- `source`, `source_url` et `retrieved_at` : métadonnées de provenance.
+- `raw_properties` : propriétés originales conservées au format JSONB.
+
+Une contrainte d'unicité sur `source_id` permet de mettre à jour les enregistrements sans créer de doublons lors des nouvelles collectes.
+
+Des index spatiaux GiST facilitent les futures requêtes géographiques.
+
+### 7.3. Vues SQL
+
+Deux vues sont actuellement disponibles pour les prévisions météorologiques :
 
 - `vw_weather_latest_forecasts` : dernière version disponible de chaque prévision horaire.
 - `vw_weather_daily_summary` : synthèse journalière des températures, précipitations, probabilités de pluie, vent et couverture nuageuse.
@@ -193,50 +340,71 @@ Les agrégations journalières utilisent le fuseau `Europe/Paris`.
 
 ## 8. Traçabilité et reprise
 
-Chaque collecte possède un identifiant dérivé du nom du fichier RAW. Les fichiers CURATED et REJECTED sont associés à cette collecte.
+Chaque exécution produit des fichiers associés à un identifiant de collecte et un rapport global.
 
-Le pipeline produit un rapport JSON comprenant notamment :
-- les dates de début et de fin ;
-- le statut global ;
-- le nombre d'observations collectées ;
-- les nombres d'observations acceptées et rejetées ;
-- le taux d'acceptation ;
-- le nombre de violations par règle ;
-- le nombre de lignes publiées ;
-- la durée d'exécution.
+Le rapport `reports/run_report.json` comprend notamment :
+
+- Le statut global.
+- La durée d'exécution.
+- Le statut de chaque étape.
+- Le nombre d'enregistrements collectés.
+- Le nombre d'enregistrements acceptés et rejetés.
+- Le taux d'acceptation.
+- Les violations par règle de qualité.
+- Le nombre de lignes publiées.
+- Les chemins des fichiers générés.
 
 ### Stratégie de reprise
 
 En cas d'échec :
-1. consulter `logs/pipeline.log` et `reports/run_report.json` ;
-2. identifier l'étape en erreur ;
-3. vérifier la disponibilité de l'API et de PostgreSQL ;
-4. corriger la configuration ou le problème identifié ;
-5. relancer le pipeline.
 
-L'UPSERT permet de rejouer une publication pour un même instant de collecte sans créer de doublons.
+1. Consulter `logs/pipeline.log` et `reports/run_report.json`.
+2. Identifier l'étape en erreur.
+3. Vérifier la disponibilité des API et de PostgreSQL.
+4. Corriger la configuration ou le problème identifié.
+5. Relancer le pipeline.
 
-Un scénario d'incident doit être exécuté et documenté séparément avant de déclarer la reprise effectivement testée.
+La publication utilise des opérations UPSERT afin de limiter les doublons lors des reprises.
+
+Une nouvelle collecte météo crée volontairement un nouveau snapshot, tandis que les espaces verts sont actualisés à partir de leur identifiant source.
 
 ## 9. Gouvernance et organisation du dépôt
 
-Le dictionnaire de données est disponible dans `docs/data_dictionary.md`.
+Les documents suivants complètent la documentation technique :
 
-Les choix d'architecture sont documentés dans `docs/ADR_001.md`. Les règles de gouvernance et les informations relatives aux sources sont décrites dans `docs/gouvernance.md` et `docs/sources.md`.
+- `docs/data_dictionary.md` : dictionnaire des données.
+- `docs/ADR_001.md` : décisions d'architecture.
+- `docs/fiche_projet.md` : fiche de présentation du projet.
+- `docs/gouvernance.md` : règles de gouvernance.
+- `docs/sources.md` : fiches descriptives des sources.
+- `docs/incident_recovery.md` : stratégie de gestion et de reprise après incident.
+- `docs/architecture/architecture.md` : architecture et lineage.
 
-Les données brutes de démonstration peuvent être conservées dans le dépôt. Les nouvelles données générées, les logs, les rapports d'exécution, les environnements virtuels et les secrets sont exclus du versionnement.
+Les fichiers `.env`, les environnements virtuels, les secrets et les fichiers temporaires ne doivent pas être versionnés.
+
+Les durées de rétention définies dans la gouvernance constituent des objectifs et ne correspondent pas à une suppression automatique actuellement implémentée.
 
 ## 10. Limites et perspectives
 
-La version actuelle est une première brique technique démontrable. Elle ne constitue pas encore un système complet de recommandation de pauses.
+SmartBreak constitue une première brique technique de collecte, de contrôle et de stockage de données.
+
+Plusieurs limites doivent être prises en compte :
+
+- Les prévisions météo sont associées à un point de référence à Paris et ne représentent pas le microclimat réel de chaque espace vert.
+- Le dataset géographique contient des catégories variées qui nécessitent un filtrage selon l'accessibilité réelle.
+- La qualité des résultats dépend de la disponibilité et de la qualité des sources externes.
+- Le moteur de recommandation n'est pas encore implémenté.
+- Aucune personnalisation selon les préférences des utilisateurs n'est actuellement disponible.
 
 Évolutions envisagées :
-- intégrer les données officielles des espaces verts de Paris ;
-- enrichir le modèle géographique avec les lieux accessibles ;
-- définir un score de confort extérieur explicable ;
-- développer une interface de consultation ;
-- intégrer des préférences utilisateur et des critères d'accessibilité ;
-- automatiser les collectes et le suivi de la qualité.
+
+- Filtrer les espaces verts réellement accessibles.
+- Enrichir les données avec des informations complémentaires sur les équipements et les horaires d'ouverture.
+- Développer des analyses spatiales avec PostGIS.
+- Définir un score explicable de confort extérieur.
+- Développer un moteur de recommandation de pauses et de balades.
+- Concevoir une interface utilisateur.
+- Automatiser la collecte et le suivi de la qualité.
 
 ## 11. Utilisation d'outils d'intelligence artificielle
 
@@ -244,6 +412,6 @@ Des outils d'intelligence artificielle ont été utilisés comme assistance au d
 
 Les scripts, les résultats de tests, les requêtes SQL et le fonctionnement du pipeline ont été vérifiés dans l'environnement local du projet. Les résultats présentés correspondent aux exécutions effectivement réalisées.
 
-## 12. Dépôt
+## 12. Dépôt GitHub
 
-GitHub : https://github.com/Abirdaboussi/SmartBreak
+https://github.com/Abirdaboussi/SmartBreak

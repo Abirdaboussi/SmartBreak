@@ -1,4 +1,3 @@
-
 """Point d'entrée unique du pipeline SmartBreak."""
 
 import json
@@ -7,12 +6,23 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Modules météo
 from src.collect import collect_weather
 from src.validate import validate_raw_file
 from src.transform import transform_weather_data
 from src.persist import save_weather_outputs
-from src.publish import publish_weather_data
+from src.publish import (
+    publish_weather_data,
+    publish_green_spaces_data,
+)
 from src.db import initialize_database, get_connection
+
+# Modules espaces verts
+from src.collect_green_spaces import collect_green_spaces
+from src.validate_green_spaces import validate_green_spaces_file
+from src.transform_green_spaces import transform_green_spaces_file
+from src.persist_green_spaces import save_green_spaces_outputs
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +34,7 @@ REPORT_FILE = REPORT_DIR / "run_report.json"
 
 
 def setup_logging():
-    """Configure les logs dans logs/pipeline.log."""
+    """Configure les logs du pipeline."""
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -61,7 +71,7 @@ def save_report(report):
 
 
 def run_pipeline():
-    """Exécute toutes les étapes du pipeline météo."""
+    """Exécute les pipelines météo et espaces verts."""
 
     logger = setup_logging()
 
@@ -70,14 +80,14 @@ def run_pipeline():
 
     report = {
         "project": "smartbreak",
-        "dataset": "weather_hourly",
+        "datasets": ["weather_hourly", "paris_green_spaces"],
         "started_at": started_at.isoformat(),
         "status": "running",
         "steps": {},
     }
 
     try:
-        # Initialisation de la base et des vues SQL
+        # 1. INITIALISATION
         logger.info("Initialisation PostgreSQL/PostGIS")
 
         initialize_database()
@@ -90,121 +100,219 @@ def run_pipeline():
 
         logger.info("Schéma et vues SQL initialisés")
 
-        # 1. COLLECT
-        logger.info("Étape 1/5 - Collecte météo")
-
-        collection = collect_weather()
-
-        raw_path = collection["raw_path"]
-        raw_data = collection["raw_data"]
-
-        report["run_id"] = raw_path.stem
-        report["raw_file"] = str(raw_path.relative_to(PROJECT_ROOT))
-        report["steps"]["collect"] = {
+        report["steps"]["database"] = {
             "status": "success",
-            "observations": collection["observation_count"],
         }
 
-        logger.info(
-            "Collecte terminée : %s observations",
-            collection["observation_count"],
-        )
+        # =====================================================
+        # 2. PIPELINE METEO
+        # =====================================================
 
-        # 2. VALIDATE
-        logger.info("Étape 2/5 - Validation des données")
+        logger.info("========== PIPELINE METEO ==========")
 
-        validation = validate_raw_file(
-            raw_path,
+        # 2.1 COLLECT
+        logger.info("Collecte météo")
+
+        weather_collection = collect_weather()
+
+        weather_raw_path = weather_collection["raw_path"]
+        weather_raw_data = weather_collection["raw_data"]
+
+        report["weather_run_id"] = weather_raw_path.stem
+        report["steps"]["weather_collect"] = {
+            "status": "success",
+            "observations": weather_collection["observation_count"],
+            "raw_file": str(
+                weather_raw_path.relative_to(PROJECT_ROOT)
+            ),
+        }
+
+        # 2.2 VALIDATE
+        logger.info("Validation météo")
+
+        weather_validation = validate_raw_file(
+            weather_raw_path,
             PROJECT_ROOT / "config" / "contracts" / "weather.yaml",
         )
 
-        accepted = validation["accepted"]
-        rejected = validation["rejected"]
-        quality_report = validation["report"]
+        weather_accepted = weather_validation["accepted"]
+        weather_rejected = weather_validation["rejected"]
+        weather_quality = weather_validation["report"]
 
-        report["steps"]["validate"] = {
-            "status": quality_report.get("status", "completed"),
-            "total": quality_report["total_observations"],
-            "accepted": quality_report["accepted_observations"],
-            "rejected": quality_report["rejected_observations"],
-            "acceptance_rate": quality_report["acceptance_rate"],
-            "rejection_rate": quality_report["rejection_rate"],
-            "rule_violations": quality_report["rule_violations"],
+        report["steps"]["weather_validate"] = {
+            "status": weather_quality.get("status", "completed"),
+            "total": weather_quality["total_observations"],
+            "accepted": weather_quality["accepted_observations"],
+            "rejected": weather_quality["rejected_observations"],
+            "acceptance_rate": weather_quality["acceptance_rate"],
+            "rejection_rate": weather_quality["rejection_rate"],
+            "rule_violations": weather_quality["rule_violations"],
         }
 
-        logger.info(
-            "Validation terminée : %s acceptées, %s rejetées",
-            len(accepted),
-            len(rejected),
+        # 2.3 TRANSFORM
+        logger.info("Transformation météo")
+
+        weather_curated = transform_weather_data(
+            weather_accepted,
+            weather_raw_data,
         )
 
-        # 3. TRANSFORM
-        logger.info("Étape 3/5 - Transformation")
-
-        curated_rows = transform_weather_data(
-            accepted,
-            raw_data,
-        )
-
-        report["steps"]["transform"] = {
+        report["steps"]["weather_transform"] = {
             "status": "success",
-            "curated_count": len(curated_rows),
+            "curated_count": len(weather_curated),
         }
 
-        logger.info(
-            "Transformation terminée : %s lignes CURATED",
-            len(curated_rows),
-        )
+        # 2.4 PERSIST
+        logger.info("Sauvegarde météo")
 
-        # 4. PERSIST
-        logger.info("Étape 4/5 - Persistance JSON")
-
-        persistence = save_weather_outputs(
-            curated_rows,
-            rejected,
-            raw_path,
-            raw_data,
+        weather_persistence = save_weather_outputs(
+            weather_curated,
+            weather_rejected,
+            weather_raw_path,
+            weather_raw_data,
             output_root=PROJECT_ROOT / "data",
         )
 
-        report["steps"]["persist"] = {
+        report["steps"]["weather_persist"] = {
             "status": "success",
             "curated_file": str(
-                persistence["curated_path"].relative_to(PROJECT_ROOT)
+                weather_persistence["curated_path"].relative_to(
+                    PROJECT_ROOT
+                )
             ),
             "rejected_file": str(
-                persistence["rejected_path"].relative_to(PROJECT_ROOT)
+                weather_persistence["rejected_path"].relative_to(
+                    PROJECT_ROOT
+                )
             ),
-            "curated_count": persistence["curated_count"],
-            "rejected_count": persistence["rejected_count"],
+            "curated_count": weather_persistence["curated_count"],
+            "rejected_count": weather_persistence["rejected_count"],
         }
 
-        logger.info("Persistance JSON terminée")
+        # 2.5 PUBLISH
+        logger.info("Publication météo dans PostgreSQL")
 
-        # 5. PUBLISH
-        logger.info("Étape 5/5 - Publication PostgreSQL/PostGIS")
+        weather_published = publish_weather_data(weather_curated)
 
-        published_count = publish_weather_data(curated_rows)
-
-        report["steps"]["publish"] = {
+        report["steps"]["weather_publish"] = {
             "status": "success",
-            "published_count": published_count,
+            "published_count": weather_published,
         }
 
         logger.info(
-            "Publication terminée : %s lignes traitées",
-            published_count,
+            "Pipeline météo terminé : %s lignes publiées",
+            weather_published,
+        )
+
+        # =====================================================
+        # 3. PIPELINE ESPACES VERTS
+        # =====================================================
+
+        logger.info("========== PIPELINE ESPACES VERTS ==========")
+
+        # 3.1 COLLECT
+        logger.info("Collecte des espaces verts")
+
+        green_collection = collect_green_spaces()
+
+        green_raw_path = green_collection["raw_path"]
+
+        report["green_spaces_run_id"] = green_raw_path.stem
+        report["steps"]["green_spaces_collect"] = {
+            "status": "success",
+            "observations": green_collection["feature_count"],
+            "raw_file": str(
+                green_raw_path.relative_to(PROJECT_ROOT)
+            ),
+        }
+
+        # 3.2 VALIDATE
+        logger.info("Validation des espaces verts")
+
+        green_validation = validate_green_spaces_file(
+            green_raw_path,
+            PROJECT_ROOT / "config" / "contracts" / "green_spaces.yaml",
+        )
+
+        green_quality = green_validation["report"]
+
+        report["steps"]["green_spaces_validate"] = {
+            "status": green_quality["status"],
+            "total": green_quality["total_observations"],
+            "accepted": green_quality["accepted_observations"],
+            "rejected": green_quality["rejected_observations"],
+            "acceptance_rate": green_quality["acceptance_rate"],
+            "rejection_rate": green_quality["rejection_rate"],
+            "rule_violations": green_quality["rule_violations"],
+        }
+
+        # 3.3 TRANSFORM
+        logger.info("Transformation des espaces verts")
+
+        green_curated = transform_green_spaces_file(
+            green_validation,
+            green_raw_path,
+        )
+
+        report["steps"]["green_spaces_transform"] = {
+            "status": "success",
+            "curated_count": len(green_curated),
+        }
+
+        # 3.4 PERSIST
+        logger.info("Sauvegarde des espaces verts")
+
+        green_persistence = save_green_spaces_outputs(
+            green_raw_path,
+            green_validation,
+            green_curated,
+        )
+
+        report["steps"]["green_spaces_persist"] = {
+            "status": "success",
+            "curated_file": str(
+                green_persistence["curated_path"].relative_to(
+                    PROJECT_ROOT
+                )
+            ),
+            "rejected_file": str(
+                green_persistence["rejected_path"].relative_to(
+                    PROJECT_ROOT
+                )
+            ),
+            "report_file": str(
+                green_persistence["report_path"].relative_to(
+                    PROJECT_ROOT
+                )
+            ),
+            "curated_count": green_persistence["curated_count"],
+            "rejected_count": green_persistence["rejected_count"],
+        }
+
+        # 3.5 PUBLISH
+        logger.info("Publication des espaces verts dans PostGIS")
+
+        green_published = publish_green_spaces_data(green_curated)
+
+        report["steps"]["green_spaces_publish"] = {
+            "status": "success",
+            "published_count": green_published,
+        }
+
+        logger.info(
+            "Pipeline espaces verts terminé : %s lignes publiées",
+            green_published,
         )
 
         report["status"] = "success"
 
-        logger.info("Pipeline exécuté avec succès")
+        logger.info("Pipeline SmartBreak exécuté avec succès")
 
     except Exception as error:
         report["status"] = "failed"
         report["error"] = str(error)
 
-        logger.exception("Échec du pipeline")
+        logger.exception("Échec du pipeline SmartBreak")
 
     finally:
         finished_at = datetime.now(timezone.utc)
@@ -231,6 +339,9 @@ def main():
     print("Statut :", report["status"])
     print("Durée :", report["duration_seconds"], "secondes")
     print("Rapport :", REPORT_FILE)
+
+    for step_name, step_result in report["steps"].items():
+        print(f"{step_name} : {step_result.get('status')}")
 
     if report["status"] != "success":
         raise SystemExit(1)

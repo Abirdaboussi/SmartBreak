@@ -21,3 +21,6 @@ data/*/*/*
 
 # --- Rapports générés ---
 reports/*.json
+
+# Rapports générés dans les sous-dossiers
+reports/**/*.json
