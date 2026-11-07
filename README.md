@@ -29,8 +29,11 @@ La version technique implémentée comprend :
 - L'historisation des prévisions météorologiques.
 - La gestion de l'unicité des espaces verts à partir de leurs identifiants sources.
 - La traçabilité des exécutions par des logs et des rapports JSON.
+- La visualisation des données et des indicateurs à travers une interface Streamlit.
 
-Le moteur de recommandation, le score de confort extérieur et l'interface utilisateur ne sont pas encore implémentés.
+L'interface Streamlit permet notamment de consulter les indicateurs du pipeline, les prévisions météorologiques et la répartition des espaces verts.
+
+Le moteur de recommandation intelligent, le score de confort extérieur et la personnalisation des suggestions ne sont pas encore implémentés.
 
 ## 2. Sources de données
 
@@ -94,20 +97,29 @@ Le projet repose sur un pipeline automatisé commun aux deux sources.
 flowchart TD
     A["Open-Meteo API"] --> C["Collecte Python"]
     B["Paris Data - Espaces verts"] --> D["Collecte Python"]
+
     C --> E["RAW - JSON"]
     D --> F["RAW - GeoJSON"]
+
     E --> G["Validation - Contrat météo"]
     F --> H["Validation - Contrat espaces verts"]
+
     G --> I["Transformation météo"]
     H --> J["Transformation espaces verts"]
+
     G --> K["REJECTED météo"]
     H --> L["REJECTED espaces verts"]
+
     I --> M["CURATED météo"]
     J --> N["CURATED espaces verts"]
+
     M --> O["Publication UPSERT"]
     N --> O
+
     O --> P[("PostgreSQL + PostGIS")]
     P --> Q["Vues SQL météo"]
+    P --> S["Interface Streamlit"]
+
     C --> R["Logs et rapport global"]
     D --> R
 ```
@@ -123,6 +135,7 @@ flowchart TD
 7. **CURATED :** sauvegarde des données transformées.
 8. **Publication :** insertion ou mise à jour des données dans PostgreSQL/PostGIS.
 9. **Traçabilité :** enregistrement des logs et génération du rapport global.
+10. **Visualisation :** consultation des données publiées à travers Streamlit.
 
 ### Technologies
 
@@ -138,6 +151,7 @@ flowchart TD
 | Accès base de données | psycopg 3 |
 | Tests | pytest |
 | Configuration | python-dotenv |
+| Interface de visualisation | Streamlit |
 
 ## 4. Installation et configuration
 
@@ -197,6 +211,20 @@ python -m src.pipeline
 ```
 
 Le pipeline exécute successivement la collecte, la validation, la transformation, la persistance et la publication des deux datasets.
+
+### Lancement de l'interface Streamlit
+
+Après avoir configuré PostgreSQL et exécuté le pipeline au moins une fois :
+
+```powershell
+python -m streamlit run app/streamlit_app.py
+```
+
+L'application est accessible à l'adresse :
+
+http://localhost:8501
+
+L'interface permet de consulter les indicateurs disponibles dans PostgreSQL/PostGIS. Elle ne déclenche pas automatiquement de nouvelle collecte.
 
 ### Organisation des sorties
 
@@ -297,6 +325,39 @@ python -m pytest -q
 ```
 
 La suite de tests exécutée contient actuellement **19 tests réussis**.
+
+### 6.5. Indicateurs de performance (KPI)
+
+Les KPI de SmartBreak sont répartis en deux catégories : les indicateurs techniques mesurés sur le pipeline actuel et les indicateurs fonctionnels prévus pour la future version du service.
+
+#### A. KPI techniques — version actuelle
+
+Les résultats suivants ont été obtenus lors des vérifications du 7 novembre 2026.
+
+| Indicateur | Résultat mesuré | Objectif |
+|---|---:|---:|
+| Taux d'acceptation des données météo | 100 % (168/168) | ≥ 95 % |
+| Taux d'acceptation des espaces verts | 99,61 % (2 525/2 535) | ≥ 95 % |
+| Géométries invalides en base | 0 | 0 |
+| Identifiants source dupliqués | 0 | 0 |
+| Tests automatisés réussis | 19/19 | 100 % |
+| Durée d'exécution du pipeline intégré | 4,773 secondes | À surveiller |
+
+Ces indicateurs permettent d'évaluer la qualité des données collectées, la cohérence du stockage et la fiabilité technique du pipeline. La durée d'exécution est une mesure ponctuelle réalisée dans l'environnement local du projet.
+
+#### B. KPI fonctionnels — version cible
+
+Les indicateurs suivants seront évalués après l'implémentation du moteur de recommandation intelligent. L'interface Streamlit actuelle assure uniquement la visualisation des données et ne calcule pas encore ces recommandations.
+
+| Indicateur | Objectif cible |
+|---|---:|
+| Recommandations respectant les seuils météorologiques définis | ≥ 90 % |
+| Recommandations associées à un espace vert identifié | 100 % |
+| Pertinence des recommandations selon les utilisateurs | ≥ 80 % |
+| Temps de réponse du moteur de recommandation | ≤ 3 secondes |
+| Satisfaction moyenne des utilisateurs | ≥ 4/5 |
+
+Ces objectifs permettront d'évaluer la pertinence du service, sa rapidité et son utilité pour les personnes souhaitant organiser une pause extérieure à Paris. Ils ne constituent pas des résultats mesurés dans la version actuelle.
 
 ## 7. Base de données PostgreSQL/PostGIS
 
@@ -403,14 +464,14 @@ Plusieurs limites doivent être prises en compte :
 - Développer des analyses spatiales avec PostGIS.
 - Définir un score explicable de confort extérieur.
 - Développer un moteur de recommandation de pauses et de balades.
-- Concevoir une interface utilisateur.
+- Enrichir l'interface Streamlit avec une carte interactive des espaces verts et des indicateurs complémentaires.
 - Automatiser la collecte et le suivi de la qualité.
 
 ## 11. Utilisation d'outils d'intelligence artificielle
 
 Des outils d'intelligence artificielle ont été utilisés comme assistance au développement, à la structuration de la documentation et à l'analyse des erreurs.
 
-Les scripts, les résultats de tests, les requêtes SQL et le fonctionnement du pipeline ont été vérifiés dans l'environnement local du projet. Les résultats présentés correspondent aux exécutions effectivement réalisées.
+Les scripts, les résultats des tests, les requêtes SQL et le fonctionnement du pipeline ont été vérifiés dans l'environnement local du projet. Les résultats présentés correspondent aux exécutions effectivement réalisées.
 
 ## 12. Dépôt GitHub
 
