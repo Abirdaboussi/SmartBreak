@@ -1,3 +1,157 @@
 # Contrat de données - source météo (Open-Meteo Forecast)
 # Version 1 rédigée à l'étape 1.3 :
 # dataset, version, grain, owner, champs obligatoires, types, règles qualité.
+contract:
+  name: weather_hourly
+  version: "1.0"
+  description: "Contrat de données horaires Open-Meteo Forecast"
+  owner: "SmartBreak Data Team"
+
+  source:
+    name: "Open-Meteo"
+    type: "REST API"
+    endpoint: "https://api.open-meteo.com/v1/forecast"
+    license: "CC BY 4.0"
+    documentation: "https://open-meteo.com/en/docs"
+
+  dataset:
+    grain: "One row per forecast hour and location"
+    location:
+      name: "Paris"
+      latitude: 48.8566
+      longitude: 2.3522
+      timezone: "GMT"
+      frequency: "hourly"
+
+  fields:
+    - name: time
+      type: string
+      format: "YYYY-MM-DDTHH:MM"
+      required: true
+      unit: "iso8601"
+      description: "Date et heure de la prévision en GMT"
+
+
+    - name: temperature_2m
+      type: float
+      required: true
+      unit: "°C"
+      min: -80
+      max: 60
+      description: "Température de l'air à 2 mètres"
+
+    - name: apparent_temperature
+      type: float
+      required: true
+      unit: "°C"
+      min: -80
+      max: 60
+      description: "Température ressentie"
+
+    - name: relative_humidity_2m
+      type: integer
+      required: true
+      unit: "%"
+      min: 0
+      max: 100
+      description: "Humidité relative à 2 mètres"
+
+    - name: precipitation
+      type: float
+      required: true
+      unit: "mm"
+      min: 0
+      description: "Quantité de précipitations prévue"
+
+    - name: precipitation_probability
+      type: integer
+      required: true
+      unit: "%"
+      min: 0
+      max: 100
+      description: "Probabilité de précipitations"
+
+    - name: wind_speed_10m
+      type: float
+      required: true
+      unit: "km/h"
+      min: 0
+      description: "Vitesse du vent à 10 mètres"
+
+    - name: cloud_cover
+      type: integer
+      required: true
+      unit: "%"
+      min: 0
+      max: 100
+      description: "Couverture nuageuse"
+
+    - name: weather_code
+      type: integer
+      required: true
+      unit: "wmo code"
+      allowed_values: [0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99]
+      description: "Code météorologique WMO"
+
+  quality_rules:
+    - id: Q01
+      name: required_fields
+      description: "All required fields must be present and non-null"
+
+    - id: Q02
+      name: unique_timestamp
+      description: "Each forecast timestamp must be unique for a location"
+
+    - id: Q03
+      name: valid_timestamp
+      description: "Timestamp must follow YYYY-MM-DDTHH:MM format"
+
+    - id: Q04
+      name: chronological_order
+      description: "Observations must be chronologically ordered"
+
+    - id: Q05
+      name: hourly_frequency
+      description: "Consecutive observations must be separated by one hour"
+
+    - id: Q06
+      name: valid_ranges
+      description: "Numeric values must respect their defined minimum and maximum"
+
+    - id: Q07
+      name: valid_weather_code
+      description: "Weather code must belong to the official WMO code list"
+
+    - id: Q08
+      name: valid_units
+      description: "API hourly_units must match the units defined in the contract"
+
+
+  raw_structure:
+    root_keys:
+      - metadata
+      - response
+
+    metadata_fields:
+      - source
+      - source_url
+      - location
+      - latitude_requested
+      - longitude_requested
+      - retrieved_at
+      - timezone_requested
+
+    response_fields:
+      - latitude
+      - longitude
+      - timezone
+      - timezone_abbreviation
+      - utc_offset_seconds
+      - elevation
+      - hourly_units
+      - hourly
+
+  storage:
+    raw_format: "JSON"
+    curated_format: "PostgreSQL"
+    timestamp_timezone: "GMT"
