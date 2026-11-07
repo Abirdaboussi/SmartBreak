@@ -1,227 +1,202 @@
+﻿"""Profilage initial des données météo RAW de SmartBreak."""
 
-"""
-SmartBreak - Open-Meteo API exploration
-
-Purpose:
-- Request hourly weather forecasts for Paris.
-- Save the original JSON response in RAW.
-- Inspect available variables, units, missing values and timestamps.
-"""
-
-from dbm import error
 import json
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pandas as pd
-import requests
-import sys
 
-
-# ---------------------------------------------------------
-# 1. Project configuration
-# ---------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "weather"
-RAW_DIR.mkdir(parents=True, exist_ok=True)
-
-API_URL = "https://api.open-meteo.com/v1/forecast"
-
-# Representative coordinates for central Paris
-LATITUDE = 48.8566
-LONGITUDE = 2.3522
-
-TIMEZONE = "GMT"
-WEATHER_VARIABLES = [
-    "temperature_2m",
-    "apparent_temperature",
-    "relative_humidity_2m",
-    "precipitation",
-    "precipitation_probability",
-    "wind_speed_10m",
-    "cloud_cover",
-    "weather_code",
-]
+REPORT_DIR = PROJECT_ROOT / "reports"
 
 
-# ---------------------------------------------------------
-# 2. API request
-# ---------------------------------------------------------
+def load_latest_raw():
+    """Charge le dernier fichier RAW sans le modifier."""
 
-def fetch_weather():
-    """Retrieve hourly weather forecasts from Open-Meteo."""
-
-    params = {
-        "latitude": LATITUDE,
-        "longitude": LONGITUDE,
-        "hourly": ",".join(WEATHER_VARIABLES),
-        "forecast_days": 2,
-        "timezone": TIMEZONE,
-        "temperature_unit": "celsius",
-        "wind_speed_unit": "kmh",
-        "precipitation_unit": "mm",
-    }
-
-    print("\nConnecting to Open-Meteo...")
-
-    response = requests.get(
-        API_URL,
-        params=params,
-        timeout=30
+    files = sorted(
+        RAW_DIR.glob("*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
     )
 
-    print("HTTP status:", response.status_code)
+    if not files:
+        raise FileNotFoundError("Aucun fichier RAW disponible.")
 
-    response.raise_for_status()
+    raw_path = files[0]
 
-    return response.json()
+    with raw_path.open("r", encoding="utf-8") as file:
+        document = json.load(file)
 
+    if not isinstance(document, dict):
+        raise ValueError("Le document RAW doit être un objet JSON.")
 
-# ---------------------------------------------------------
-# 3. Save original RAW response
-# ---------------------------------------------------------
+    response = document.get("response", {})
+    hourly = response.get("hourly")
 
-def save_raw_response(data):
-    """Save the original API response without transformation."""
+    if not isinstance(hourly, dict) or "time" not in hourly:
+        raise ValueError("Les données horaires sont absentes du RAW.")
 
-    retrieved_at = datetime.now(ZoneInfo(TIMEZONE))
+    print("Fichier RAW utilisé :", raw_path.name)
 
-    filename = (
-    "sample_open_meteo_paris_"
-    + retrieved_at.strftime("%Y%m%d_%H%M%S")
-    + ".json"
-    )
-
-    output_path = RAW_DIR / filename
-
-    raw_document = {
-        "metadata": {
-            "source": "Open-Meteo Forecast API",
-            "source_url": API_URL,
-            "location": "Paris, France",
-            "latitude_requested": LATITUDE,
-            "longitude_requested": LONGITUDE,
-            "retrieved_at": retrieved_at.isoformat(),
-            "timezone_requested": TIMEZONE,
-        },
-        "response": data,
-    }
-
-    with output_path.open("w", encoding="utf-8") as file:
-        json.dump(
-            raw_document,
-            file,
-            ensure_ascii=False,
-            indent=2
-        )
-
-    print("\nRAW response saved:")
-    print(output_path)
-
-    return output_path
+    return document, raw_path
 
 
-# ---------------------------------------------------------
-# 4. Inspect API metadata
-# ---------------------------------------------------------
+def profile_weather(document):
+    """Calcule les statistiques descriptives du jeu de données."""
 
-def inspect_metadata(data):
-    print("\n========== API METADATA ==========")
-
-    print("Latitude returned:", data.get("latitude"))
-    print("Longitude returned:", data.get("longitude"))
-    print("Timezone:", data.get("timezone"))
-    print("Timezone abbreviation:", data.get("timezone_abbreviation"))
-    print("UTC offset (seconds):", data.get("utc_offset_seconds"))
-    print("Elevation (m):", data.get("elevation"))
-
-    print("\nHourly units:")
-
-    for variable, unit in data.get("hourly_units", {}).items():
-        print(f"- {variable}: {unit}")
-
-
-# ---------------------------------------------------------
-# 5. Convert hourly arrays into a DataFrame
-# ---------------------------------------------------------
-
-def inspect_hourly_data(data):
-    print("\n========== HOURLY DATA ==========")
-
-    hourly = data.get("hourly")
-
-    if not hourly or "time" not in hourly:
-        raise ValueError("The API response does not contain hourly data.")
-
-    df = pd.DataFrame(hourly)
+    df = pd.DataFrame(document["response"]["hourly"])
 
     if df.empty:
-        raise ValueError("The hourly dataset is empty.")
+        raise ValueError("Le jeu de données est vide.")
 
-    print("Dataset shape:", df.shape)
-    print("Number of observations:", len(df))
-    print("Number of columns:", len(df.columns))
+    print("\n========== DIMENSIONS ==========")
+    print("Nombre de lignes :", len(df))
+    print("Nombre de colonnes :", len(df.columns))
 
-    print("\nColumns:")
-    print(df.columns.tolist())
-
-    print("\nFirst 5 observations:")
-    print(df.head().to_string(index=False))
-
-    print("\nLast 5 observations:")
-    print(df.tail().to_string(index=False))
-
-    print("\nMissing values by column:")
-    print(df.isna().sum().to_string())
-
-    print("\nData types:")
+    print("\n========== CHAMPS ET TYPES ==========")
     print(df.dtypes.to_string())
 
-    print("\nTime range:")
-    print("Start:", df["time"].min())
-    print("End:", df["time"].max())
+    print("\n========== VALEURS MANQUANTES ==========")
 
-    # Check that the returned timestamps are hourly
-    timestamps = pd.to_datetime(df["time"])
-    differences = timestamps.diff().dropna()
+    missing = pd.DataFrame({
+        "missing_count": df.isna().sum(),
+        "missing_percentage": df.isna().mean() * 100,
+    })
 
-    print("\nTimestamp interval check:")
-    print(differences.value_counts().to_string())
+    print(missing.to_string())
 
-    return df
+    print("\n========== DOUBLONS ==========")
 
+    duplicate_rows = int(df.duplicated().sum())
+    duplicate_times = int(df["time"].duplicated().sum())
 
-# ---------------------------------------------------------
-# 6. Main execution
-# ---------------------------------------------------------
+    print("Lignes entièrement dupliquées :", duplicate_rows)
+    print("Horodatages dupliqués :", duplicate_times)
+
+    print("\n========== STATISTIQUES NUMÉRIQUES ==========")
+
+    numeric_columns = [
+        column
+        for column in df.select_dtypes(include="number").columns
+        if column != "weather_code"
+    ]
+
+    numeric_stats = df[numeric_columns].describe().T
+
+    print(numeric_stats.to_string())
+
+    print("\n========== VARIABLES CATÉGORIELLES ==========")
+
+    categorical_columns = [
+        column
+        for column in df.columns
+        if column == "weather_code"
+        or df[column].dtype == "object"
+        and column != "time"
+    ]
+
+    categorical_stats = {}
+
+    for column in categorical_columns:
+        frequencies = (
+            df[column]
+            .value_counts(dropna=False)
+            .head(10)
+        )
+
+        categorical_stats[column] = {
+            str(value): int(count)
+            for value, count in frequencies.items()
+        }
+
+        print(f"\n{column} - Top 10 :")
+        print(frequencies.to_string())
+
+    print("\n========== PLAGE TEMPORELLE ==========")
+
+    timestamps = pd.to_datetime(df["time"], errors="coerce")
+
+    print("Début :", timestamps.min())
+    print("Fin :", timestamps.max())
+
+    intervals = timestamps.diff().dropna().value_counts()
+
+    print("\nFréquences des intervalles :")
+    print(intervals.to_string())
+
+    # Construction du rapport exportable.
+    report = {
+        "dataset": "weather_hourly",
+        "source": document.get("metadata", {}).get("source"),
+        "raw_retrieved_at": document.get("metadata", {}).get("retrieved_at"),
+        "row_count": int(len(df)),
+        "column_count": int(len(df.columns)),
+        "columns": [
+            {
+                "name": column,
+                "type": str(df[column].dtype),
+            }
+            for column in df.columns
+        ],
+        "missing_values": {
+            column: {
+                "count": int(df[column].isna().sum()),
+                "percentage": float(df[column].isna().mean() * 100),
+            }
+            for column in df.columns
+        },
+        "duplicate_rows": duplicate_rows,
+        "duplicate_timestamps": duplicate_times,
+        "numeric_statistics": {
+            column: {
+                "min": float(df[column].min()),
+                "max": float(df[column].max()),
+                "mean": float(df[column].mean()),
+                "median": float(df[column].median()),
+            }
+            for column in numeric_columns
+        },
+        "categorical_frequencies": categorical_stats,
+        "time_range": {
+            "start": str(timestamps.min()),
+            "end": str(timestamps.max()),
+        },
+        "interval_frequencies": {
+            str(interval): int(count)
+            for interval, count in intervals.items()
+        },
+    }
+
+    return report
+
 
 def main():
-    try:
-        data = fetch_weather()
+    document, raw_path = load_latest_raw()
+    report = profile_weather(document)
 
-        save_raw_response(data)
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-        inspect_metadata(data)
+    report_path = REPORT_DIR / "weather_profile.json"
 
-        df = inspect_hourly_data(data)
+    with report_path.open("w", encoding="utf-8") as file:
+        json.dump(
+            report,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
 
-        print("\n========== EXPLORATION SUMMARY ==========")
-        print("API exploration completed successfully.")
-        print("Observations:", len(df))
-        print("Variables:", len(df.columns) - 1)
-        print("Total missing values:", int(df.isna().sum().sum()))
-
-    except requests.RequestException as error:
-        print("\nAPI request failed:")
-        print(error)
-        sys.exit(1)
-    except (ValueError, KeyError, TypeError) as error:            
-        print("\nData inspection failed:")
-        print(error)
-        sys.exit(1)
+    print("\n========== PROFILING SUMMARY ==========")
+    print("Observations :", report["row_count"])
+    print("Variables :", report["column_count"])
+    print("Valeurs manquantes :", sum(
+        item["count"]
+        for item in report["missing_values"].values()
+    ))
+    print("Lignes dupliquées :", report["duplicate_rows"])
+    print("Horodatages dupliqués :", report["duplicate_timestamps"])
+    print("\nRapport enregistré :", report_path)
 
 
 if __name__ == "__main__":

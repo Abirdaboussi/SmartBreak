@@ -1,4 +1,4 @@
-
+﻿
 """Collecte des prévisions météo depuis Open-Meteo."""
 
 import json
@@ -38,7 +38,7 @@ def fetch_weather():
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
         "hourly": ",".join(WEATHER_VARIABLES),
-        "forecast_days": 2,
+        "forecast_days": 7,
         "timezone": TIMEZONE,
         "temperature_unit": "celsius",
         "wind_speed_unit": "kmh",
